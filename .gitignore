@@ -1,0 +1,7 @@
+# Keep Q1 implementation local; track only the directory placeholder.
+/apps/q1/*
+!/apps/q1/.gitkeep
+
+# Local agent configuration.
+/.agents/
+/.codex/
