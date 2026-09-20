@@ -1,7 +1,16 @@
-# Keep Q1 implementation local; track only the directory placeholder.
-/apps/q1/*
-!/apps/q1/.gitkeep
-
 # Local agent configuration.
 /.agents/
 /.codex/
+
+# Generated build files.
+work/
+*.o
+*.aso
+*.obj
+*.dlx
+*.lst
+Makefile.depend
+/bin/vm
+
+# Required supplied library with no companion source code.
+!/lib/share_memory.o

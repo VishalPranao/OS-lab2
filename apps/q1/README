@@ -1,0 +1,53 @@
+Q1: producer/consumer using locks
+
+Build from lab2/ with the provided toolchain environment:
+  mainframer.sh "make -C os && make -C apps/q1"
+The handout's alternative is to copy lab2 to /tmp and run those make
+commands there. The OS must be built before the application libraries
+can be linked. No OS changes are needed for Q1.
+
+Run from lab2/ after building:
+  make -C apps/q1 run PAIRS=3
+Or from lab2/bin/:
+  dlxsim -x os.dlx.obj -a -u makeprocs.dlx.obj 3
+make run only runs existing executables; it does not build them.
+Other questions/example share bin/makeprocs.dlx.obj. Clean and rebuild
+Q1 when switching applications to avoid running another parent's binary.
+
+Files:
+  include/buffer.h        Shared buffer and synchronization handles.
+  makeprocs/makeprocs.c   Initialize shared memory and start N pairs.
+  producer/producer.c     Insert 0123456789, retrying when full.
+  consumer/consumer.c     Remove 0123456789 in order for each consumer.
+
+The array has 32 entries, with one unused entry to distinguish full from
+empty. One lock protects the indices, characters, and operation prints.
+A consumer only removes the front character when it matches its next
+expected character. Every unsuccessful attempt releases the lock before
+retrying. Only completion uses a semaphore: as in the supplied example,
+its initial count is 1 - 2*N and the parent waits once. Each child signals
+once after its last buffer operation. process_create returns void.
+Inputs are restricted to 1..15 pairs because DLXOS has 32 process slots.
+API failures print an error and exit; completion assumes children succeed.
+
+Before submission, from lab2/:
+  make -C apps/q1 clean
+  make -C os clean
+Also clean every other built application and check for generated files.
+Preserve the supplied lib/share_memory.o.
+
+References:
+  ECE 695 Fall 2026 Laboratory #2 handout.
+  Supplied apps/example programs and Makefiles, apps/Makerules,
+  include/lab2-api.h, include/misc.h, and os/synch.c.
+  Implementation assistance: OpenAI Codex in this workspace.
+No external web sources were used.
+
+Validation: built the OS and Q1 in a temporary /tmp copy. Checked 1, 3,
+and 4 pairs with default simulator memory, and 8 pairs with:
+  dlxsim -m 0x1000000 -x os.dlx.obj -a -u makeprocs.dlx.obj 8
+All checked runs had correct per-process sequences, FIFO behavior, message
+counts, and normal termination. Invalid arguments were also checked.
+The default simulator memory ran out with 8 pairs; the 15-pair input
+limit reflects process slots, not a guarantee of sufficient memory.
+Generated test artifacts are outside the source tree.
