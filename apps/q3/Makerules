@@ -1,0 +1,9 @@
+HDRS=usertraps.h lab2-api.h misc.h
+FINALHDRS+=../include/buffer.h
+APPROOT=../..
+INCDIR+=-I../include
+
+top: default
+
+run:
+	$(MAKE) -C .. run

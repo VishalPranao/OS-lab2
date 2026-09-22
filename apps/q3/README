@@ -1,0 +1,46 @@
+Q3: producer/consumer using locks and condition variables
+
+Build from lab2/ with the provided toolchain environment:
+  mainframer.sh "make -C os && make -C apps/q3"
+
+Run from lab2/ after building:
+  make -C apps/q3 run PAIRS=3
+Or run from lab2/bin/:
+  dlxsim -x os.dlx.obj -a -u makeprocs.dlx.obj 3
+
+The OS condition-variable implementation is in os/synch.c and
+include/os/synch.h. Each condition stores its associated lock and a FIFO
+queue of waiting processes. cond_wait enqueues the caller, releases the
+associated lock, and sleeps atomically. cond_signal transfers the lock to
+one waiter and then sleeps in the lock queue until it owns the lock again.
+Both calls return SYNC_SUCCESS on success, as recommended by the handout.
+
+The application uses one not_full condition for producers and one condition
+for each possible next digit for consumers. A producer waits on not_full
+while the circular buffer is full. A consumer waits on the condition for
+its next digit while the buffer is empty or its expected digit is not at
+the front. All conditions share the same buffer lock. The parent still uses
+a semaphore only to wait for all children to finish, as required.
+
+Q1, Q2, and Q3 produce executables with the same names in bin/. Clean and
+rebuild the desired application when switching questions. The run target
+only runs existing executables; it does not build them.
+
+Before submission, clean every built application and the OS. For Q3:
+  make -C apps/q3 clean
+  make -C os clean
+Preserve the supplied lib/share_memory.o.
+
+References:
+  ECE 695 Fall 2026 Laboratory #2 handout supplied by the user.
+  Supplied OS lock/semaphore code, apps/example, and Q1 in this workspace.
+  Implementation assistance: OpenAI Codex in this workspace.
+No external web sources were used.
+
+Validation:
+Built the OS and Q3 in a temporary /tmp copy. Runs with 1, 3, and 4 pairs
+used default simulator memory; 8 pairs used -m 0x1000000. Checked each
+process's 0123456789 sequence, FIFO removals, buffer capacity, message
+counts, and graceful termination. Inputs 0, 16, abc, and -1 were rejected.
+Q1 and Q2 also passed three-pair regression runs with the modified OS.
+Generated test artifacts remain outside the source tree.

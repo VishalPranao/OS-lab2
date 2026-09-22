@@ -12,6 +12,7 @@
 #include "queue.h"
 
 static Sem sems[MAX_SEMS]; 	// All semaphores in the system
+static Cond conds[MAX_CONDS];
 static Lock locks[MAX_LOCKS];   // All locks in the system
 
 extern struct PCB *currentPCB; 
@@ -27,10 +28,10 @@ int SynchModuleInit() {
     sems[i].inuse = 0;
   }
   for(i=0; i<MAX_LOCKS; i++) {
-    // Your stuff for initializing locks goes here
+    locks[i].inuse = 0;
   }
   for(i=0; i<MAX_CONDS; i++) {
-    // Your stuff for initializing Condition variables goes here
+    conds[i].inuse = 0;
   }
   dbprintf ('p', "SynchModuleInit: Leaving SynchModuleInit\n");
   return SYNC_SUCCESS;
@@ -287,6 +288,7 @@ int LockRelease(Lock *k) {
 
   if (k->pid != GetCurrentPid()) {
     dbprintf('s', "LockRelease: Proc %d does not own lock %d.\n", GetCurrentPid(), (int)(k-locks));
+    RestoreIntrs(intrs);
     return SYNC_FAIL;
   }
   k->pid = -1;
@@ -333,6 +335,7 @@ int LockTransfer(Lock *k, PCB *pcb) {
 
   if (k->pid != GetCurrentPid()) {
     dbprintf('s', "LockTransfer: Proc %d does not own lock %d.\n", GetCurrentPid(), (int)(k-locks));
+    RestoreIntrs(intrs);
     return SYNC_FAIL;
   }
 
@@ -371,53 +374,92 @@ int LockTransfer(Lock *k, PCB *pcb) {
 //	should return handle of the condition variable.
 //--------------------------------------------------------------------------
 cond_t CondCreate(lock_t lock) {
-  // Your code goes here
+  cond_t c;
+  uint32 intrs;
+
+  if (lock < 0 || lock >= MAX_LOCKS || !locks[lock].inuse)
+    return SYNC_FAIL;
+  intrs = DisableIntrs();
+  for (c = 0; c < MAX_CONDS; c++) {
+    if (!conds[c].inuse) {
+      if (AQueueInit(&conds[c].waiting) != QUEUE_SUCCESS) {
+        RestoreIntrs(intrs);
+        return SYNC_FAIL;
+      }
+      conds[c].lock = lock;
+      conds[c].inuse = 1;
+      RestoreIntrs(intrs);
+      return c;
+    }
+  }
+  RestoreIntrs(intrs);
   return SYNC_FAIL;
 }
 
-//---------------------------------------------------------------------------
-//	CondHandleWait
-//
-//	This function makes the calling process block on the condition variable
-//	till ConditionHandleSignal is
-//	received. The process calling CondHandleWait must have acquired the
-//	lock associated with the condition variable (the lock that was passed
-//	to CondCreate. This implies the lock handle needs to be stored
-//	somewhere. hint! hint!) for this function to
-//	succeed. If the calling process has not acquired the lock, it does not
-//	block on the condition variable, but a value of 1 is returned
-//	indicating that the call was not successful. Return value of 0 implies
-//	that the call was successful.
-//
-//	This function should be written in such a way that the calling process
-//	should release the lock associated with this condition variable before
-//	going to sleep, so that the process that intends to signal this
-//	process could acquire the lock for that purpose. The process will be holding
-//	the lock after woken up, since the process calling CondHandleSignal
-//	transfers the lock to it.
-//---------------------------------------------------------------------------
+/* Enqueue, release, and sleep atomically to avoid a lost signal.
+ * A signaler transfers the lock to us before waking us. */
 int CondHandleWait(cond_t c) {
-  // Your code goes here
+  Lock *k;
+  Link *l;
+  uint32 intrs;
+
+  if (c < 0 || c >= MAX_CONDS || !conds[c].inuse) return SYNC_FAIL;
+  intrs = DisableIntrs();
+  k = &locks[conds[c].lock];
+  if (k->pid != GetCurrentPid()) {
+    RestoreIntrs(intrs);
+    return SYNC_FAIL;
+  }
+  l = AQueueAllocLink((void *)currentPCB);
+  if (l == NULL) {
+    RestoreIntrs(intrs);
+    return SYNC_FAIL;
+  }
+  if (AQueueInsertLast(&conds[c].waiting, l) != QUEUE_SUCCESS) {
+    printf("FATAL ERROR: condition wait queue insertion failed!\n");
+    exitsim();
+  }
+  if (LockRelease(k) != SYNC_SUCCESS) {
+    printf("FATAL ERROR: condition wait lock release failed!\n");
+    exitsim();
+  }
+  ProcessSleep();
+  RestoreIntrs(intrs);
   return SYNC_SUCCESS;
 }
 
-
-
-//---------------------------------------------------------------------------
-//	CondHandleSignal
-//
-//	This call wakes up exactly one process waiting on the condition
-//	variable, if at least one is waiting. If there are no processes
-//	waiting on the condition variable, it does nothing. In either case,
-//	the calling process must have acquired the lock associated with
-//	condition variable for this call to succeed, in which case it returns
-//	0. If the calling process does not own the lock, it returns 1,
-//	indicating that the call was not successful. If a process is woken up, the
-//	calling process should transfer its lock to the process woken up, and put
-//	itself into sleep. Note that the calling process must hold the lock when it
-//	wakes up again, since it is still in the critical section.
-//---------------------------------------------------------------------------
+/* Hoare variant: hand the lock to one waiter, then join the ordinary
+ * lock queue. Returning from LockAcquire guarantees we own it again. */
 int CondHandleSignal(cond_t c) {
-  // Your code goes here
-  return SYNC_SUCCESS;
+  Lock *k;
+  Link *l;
+  PCB *waiter;
+  uint32 intrs;
+  int result;
+
+  if (c < 0 || c >= MAX_CONDS || !conds[c].inuse) return SYNC_FAIL;
+  intrs = DisableIntrs();
+  k = &locks[conds[c].lock];
+  if (k->pid != GetCurrentPid()) {
+    RestoreIntrs(intrs);
+    return SYNC_FAIL;
+  }
+  if (AQueueEmpty(&conds[c].waiting)) {
+    RestoreIntrs(intrs);
+    return SYNC_SUCCESS;
+  }
+  l = AQueueFirst(&conds[c].waiting);
+  waiter = (PCB *)AQueueObject(l);
+  if (AQueueRemove(&l) != QUEUE_SUCCESS) {
+    printf("FATAL ERROR: condition signal queue removal failed!\n");
+    exitsim();
+  }
+  if (LockTransfer(k, waiter) != SYNC_SUCCESS) {
+    printf("FATAL ERROR: condition signal lock transfer failed!\n");
+    exitsim();
+  }
+  ProcessWakeup(waiter);
+  result = LockAcquire(k);
+  RestoreIntrs(intrs);
+  return result;
 }
